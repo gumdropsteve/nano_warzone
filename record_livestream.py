@@ -13,7 +13,7 @@ import pandas as pd
 from sklearn.neighbors import KNeighborsClassifier
 
 import pytesseract as tess
-tess.pytesseract.tesseract_cmd = r'C:\Users\war23\AppData\Local\Tesseract-OCR\tesseract.exe'
+# tess.pytesseract.tesseract_cmd = r'C:\Users\war23\AppData\Local\Tesseract-OCR\tesseract.exe'
 
 import dask
 import dask.delayed
@@ -41,8 +41,7 @@ def capture_screenshot(out_route=False, preprocess=True):
     try:
         base_screenshot = pyautogui.screenshot() 
     except Exception as e:
-        # print(e)  # OSError: screen grab failed
-        self.n_screenshot_errors += 1
+        print(e)  # OSError: screen grab failed
         sleep(3)
         base_screenshot = pyautogui.screenshot()
     
@@ -52,13 +51,13 @@ def capture_screenshot(out_route=False, preprocess=True):
         base_screenshot.save(out_route)
         
     if preprocess:
-        return preprocess_screenshot(base_screenshot, resize=True), record_datetime
+        return preprocess_screenshot(base_screenshot, resize=True, gpu=True), record_datetime
         
     else:
         return base_screenshot, record_datetime
 
 
-def preprocess_screenshot(screenshot, resize=False):
+def preprocess_screenshot(screenshot, resize=False, gpu=True):
     """
     input: PIL Image
     
@@ -67,11 +66,25 @@ def preprocess_screenshot(screenshot, resize=False):
     if resize:
         screenshot = screenshot.resize((1280, 720))
     
-    grayscale = ImageOps.grayscale(screenshot)  # want to switch this to subtracting the mean
-
+    # convert PIL Image -> numpy array
+    screenshot = np.array(screenshot)
+    
+    if gpu:
+        # upload resized frame to GPU
+        gpu_frame = cv.cuda_GpuMat()
+        gpu_frame.upload(screenshot)
+    
     # translate colors to opencv
-    screenshot = cv.cvtColor(np.array(grayscale), cv.COLOR_RGB2BGR)  # why/is this necessary? w/ grayscale already done?
+    screenshot = cv.cvtColor(screenshot, cv.COLOR_RGB2BGR)
 
+    if gpu:
+        # upload pre-processed frame to GPU
+        gpu_previous = cv.cuda_GpuMat()
+        gpu_previous.upload(screenshot)
+    
+    # convert to grayscale
+    screenshot = cv.cvtColor(screenshot, cv.COLOR_BGR2GRAY)  # why/is this necessary? w/ grayscale already done?
+    
     return screenshot
 
 
@@ -133,7 +146,6 @@ def find_needle(needle, haystack, threshold=0.8, bounding_box=False):
 def pull_numbers(image, model, knn=True):
     i = image.copy()
 #         i = cv.resize(i, (self.IMG_SIZE, self.IMG_SIZE))
-    i = cv.cvtColor(i, cv.COLOR_BGR2GRAY)  # why? (due to resize?) (from nn vid)
     if knn is True:
         i = i.reshape(1, -1)  # flatten
         
@@ -171,7 +183,7 @@ class Numbers():
         self.n_pred_errors = 0
         self.n_screenshot_errors = 0
    
-    def load_image_arrays(self, max_val=False, max_label_sample=False):
+    def load_image_arrays(self, max_val=False, max_label_sample=False, test=False):
         """
         load & resize image arrays
         
@@ -184,80 +196,21 @@ class Numbers():
         
         currently supports (38, 28) and (28, 28) sized inputs
         """
-        if max_val:
-            df = self.df.copy()
-            # fix digits
-            df.numbers.loc[df.numbers == '00'] = 0
-            for _ in range(160):
-                if _ <= 152:
-                    df.numbers.loc[df.numbers == f'{_}'] = _
-                    df.numbers.loc[df.numbers == f'{float(_)}'] = _
-                    # relabel: partially blurry > blurry
-                    for e in [f'b{_}', f'{_}b', f'{_}bb', f'b{float(_)}', f'{float(_)}b' f'{float(_)}bb']:
-                        df.numbers.loc[df.numbers == e] = 'b'
-                        if _ < 10:
-                            df.numbers.loc[df.numbers == f'b0{_}'] = 'b'
-                    # remove all icon issue numbers
-                    for e in [f'i{int(_)}', f'{int(_)}i', f'i{float(_)}', f'{float(_)}i',
-                              f'i{float(_)}b', f'b{float(_)}i', f'b{int(_)}i', f'i{int(_)}b', f'ie{int(_)}', f'ie{float(_)}',
-                              f'i{int(_)}e', f'i{float(_)}e']:
-                        df = df.loc[df.numbers != e]
-                    # remove other error issue numbers
-                    for e in [f'e{_}', f'{_}e', f'e{float(_)}', f'{float(_)}e']:
-                        df = df.loc[df.numbers != e]
-                else:
-                    # remove any numbers over 152
-                    for e in [f'{int(_)}', f'i{int(_)}', f'{int(_)}i', f'i{float(_)}', f'{float(_)}i', 
-                              f'b{int(_)}', f'{int(_)}b',
-                              f'e{int(_)}', f'e{float(_)}']:
-                        df = df.loc[df.numbers != e]
-            # fix nulls (standardize)
-            df.numbers.loc[df.numbers == 'b'] = ''
-            df.numbers.loc[df.numbers == 'e'] = ''
-            df.numbers.loc[df.numbers == 'r'] = ''
-            df.numbers.loc[df.numbers == 'n'] = ''
-            df.numbers.loc[df.numbers == 'bb'] = ''
-            df.numbers.loc[df.numbers == 'ib'] = ''
-            df.numbers.loc[df.numbers == 'ibb'] = ''
-            df.numbers.loc[df.numbers == 'ie'] = ''
-            df.numbers.loc[df.numbers == 'nn'] = ''
-            df.numbers.loc[df.numbers == ''] = 153
-            # 0-9 only (or similar)
-            df = df.loc[df.numbers != '']
-            df = df.loc[df.numbers <= max_val]
-            # cap samples of any outcome
-            if max_label_sample:
-                for value in df.numbers.unique():
-                    c = len(df.loc[df.numbers==value])
-                    if c > max_label_sample:
-                        temp_df = df.loc[df.numbers == value].sample(max_label_sample)
-                        df = df.loc[df.numbers != value]
-                        df = pd.concat([df, temp_df])
-#                     print(f'{value} | {len(df.loc[df.numbers==value])}')
-            # return labels as int
-            image_labels = df.numbers.astype('int')
-            file_paths = df['file_path'].values
+        # testing data it is
+        if test:
+            testing_data = np.load('testing_data.npy', allow_pickle=True)
+            testing_imgs = [img for img, lbl in testing_data]
+            testing_lbls = [lbl for img, lbl in testing_data]
+            # return testing data
+            return testing_imgs, testing_lbls
+        
+        # training data it is
         else:
-            file_paths = self.df['file_path'].values
-            image_labels = self.df['numbers'].values
-        
-        image_arrays = []
-        for path in file_paths:
-            base_size = Image.open(path).size
-            if base_size == (38, 28):
-                img = cv.imread(path, cv.IMREAD_GRAYSCALE)  # single channel
-                img = Image.fromarray(img).crop((0, 0-5, 38, 28+5))  # 38x28 > 38x38
-#                 img = cv.resize(np.array(img), (self.IMG_SIZE, self.IMG_SIZE))  # 50x50
-                image_arrays.append(np.array(img))
-            elif base_size == (28, 28):
-                img = cv.imread(path, cv.IMREAD_GRAYSCALE)
-                img = Image.fromarray(img).crop((0-3, 0-5, 28+7, 28+5))  # 28x28 > 38x38
-#                 img = cv.resize(np.array(img), (self.IMG_SIZE, self.IMG_SIZE))  # 50x50
-                image_arrays.append(np.array(img))
-            else:
-                raise Exception(f'\nerror: unknown size | {base_size}')
-        
-        return image_arrays, image_labels
+            training_data = np.load('training_data.npy', allow_pickle=True)
+            training_imgs = [img for img, lbl in training_data]
+            training_lbls = [lbl for img, lbl in training_data]
+            # return training data
+            return training_imgs, training_lbls
     
     def train_knn(self, train_data, labels, n_neighbors=1):
         """
@@ -338,6 +291,7 @@ class Numbers():
         
         self.last_screenshot = None
         self.last_k_pred = None
+        # self.recent_k_preds = []
         self.last_pr_pred = None
         self.last_tr_pred = None
         self.streamer = None
@@ -350,10 +304,10 @@ class Numbers():
         
         self.model = model
         
-        # who are we watching?
-        for window_title in pyautogui.getAllTitles():
-            if ('- Twitch' in window_title) or ('- YouTube' in window_title):
-                self.streamer = window_title.split(' -')[0]
+        # # who are we watching?
+        # for window_title in pyautogui.getAllTitles():
+        #     if ('- Twitch' in window_title) or ('- YouTube' in window_title):
+        #         self.streamer = window_title.split(' -')[0]
         
         # start recording
         for _ in range(n_loops):
@@ -718,7 +672,7 @@ class Numbers():
             print(f'runtime: {self.session_end_datetime - self.session_start_datetime}')
     
     @dask.delayed
-    def crop_predict_save(self, image, crop, model, file_path, recrop=False, return_crop=False):
+    def crop_predict_save(self, image, crop, model, file_path, recrop=False, resize=True, return_crop=False):
         """
         > image
             >> PIL Image
@@ -735,12 +689,17 @@ class Numbers():
         if crop is not None:
             i = i.crop(crop)
         if file_path is not None:
-            i.save(file_path)
+            # i.save(file_path)
+            pass
         if recrop:
             i = i.crop(recrop)
+        if resize:
+            i = cv.resize(np.array(i), (50, 50))
+        else:
+            i = np.array(i)
         # make predictions
         if model is not None:
-            numbers = pull_numbers(image=np.array(i), model=model, knn=True)
+            numbers = pull_numbers(image=i, model=model, knn=True)
             numbers = numbers[0]
             # return predictions
             if return_crop == False:
@@ -1048,8 +1007,21 @@ class Numbers():
         
 
 if __name__ == '__main__':
+    # create an instance
     n = Numbers()
-    data, labels = n.load_image_arrays(max_val=152)
-    knn = n.train_knn(data, labels)
+
+    # load training data & convert labels from 1-hot to ints
+    data, labels = n.load_image_arrays()
+    labels = [np.where(lbl==1)[0][0] for lbl in labels]
+
+    # train knn model
+    knn = n.train_knn(data, labels, n_neighbors=1)
+
+    # delete training data
+    del data, labels
+
+    # clear output directory
     n.clear_output_dir()
-    n.record_livestream(model=knn, n_loops=1000, printout=True)
+
+    # record livestream
+    n.record_livestream(model=knn, n_loops=100, printout=True)
