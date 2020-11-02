@@ -63,9 +63,6 @@ def preprocess_screenshot(screenshot, resize=False, gpu=True):
     
     output: 1280x720p, bgr -> grayscale screenshot (nd.array)
     """
-    if resize:
-        screenshot = screenshot.resize((1280, 720))
-    
     # convert PIL Image -> numpy array
     screenshot = np.array(screenshot)
     
@@ -73,19 +70,26 @@ def preprocess_screenshot(screenshot, resize=False, gpu=True):
         # upload resized frame to GPU
         gpu_frame = cv.cuda_GpuMat()
         gpu_frame.upload(screenshot)
-    
-    # translate colors to opencv
-    screenshot = cv.cvtColor(screenshot, cv.COLOR_RGB2BGR)
 
-    if gpu:
-        # upload pre-processed frame to GPU
-        gpu_previous = cv.cuda_GpuMat()
-        gpu_previous.upload(screenshot)
+        if resize:
+            screenshot = cv.cuda.resize(gpu_frame, (1280, 720))
+            screenshot = cv.cuda.cvtColor(screenshot, cv.COLOR_RGB2BGR)
+            screenshot = cv.cuda.cvtColor(screenshot, cv.COLOR_BGR2GRAY)
+        else:
+            screenshot = cv.cuda.cvtColor(gpu_frame, cv.COLOR_RGB2BGR)
+            screenshot = cv.cuda.cvtColor(screenshot, cv.COLOR_BGR2GRAY)
+
+        return screenshot.download()
+
+    else:    
+        if resize:
+            screenshot = screenshot.resize((1280, 720))
+        # translate colors to opencv
+        screenshot = cv.cvtColor(screenshot, cv.COLOR_RGB2BGR)
+        # convert to grayscale
+        screenshot = cv.cvtColor(screenshot, cv.COLOR_BGR2GRAY)  # why/is this necessary? w/ grayscale already done?
     
-    # convert to grayscale
-    screenshot = cv.cvtColor(screenshot, cv.COLOR_BGR2GRAY)  # why/is this necessary? w/ grayscale already done?
-    
-    return screenshot
+        return screenshot
 
 
 def record_numbers(numbers, file_path):
@@ -259,33 +263,33 @@ class Numbers():
         # load in icons
         # TO DO: check quality of current -> narrow this down to 1 or blend them or whatever
         dark_needle_icon = Image.open(f'{self.icons_dir}dark_kills_counter_skull_icon.jpg')
-        dark_needle_icon = preprocess_screenshot(dark_needle_icon, resize=False)
+        dark_needle_icon = preprocess_screenshot(dark_needle_icon, resize=False, gpu=False)
         dark_needle_icon_2 = Image.open(f'{self.icons_dir}dark_kills_counter_skull_icon_2.jpg')
-        dark_needle_icon_2 = preprocess_screenshot(dark_needle_icon_2, resize=False)
+        dark_needle_icon_2 = preprocess_screenshot(dark_needle_icon_2, resize=False, gpu=False)
         
         players_remaining_icon = Image.open(f'{self.icons_dir}players_remaining_icon.png')
-        players_remaining_icon = preprocess_screenshot(players_remaining_icon, resize=False)
+        players_remaining_icon = preprocess_screenshot(players_remaining_icon, resize=False, gpu=False)
         
         # TO DO: check quality of current -> narrow this down to 1 or blend them or whatever
         teams_remaining_icon = Image.open(f'{self.icons_dir}teams_remaining_icon.png')
-        teams_remaining_icon = preprocess_screenshot(teams_remaining_icon, resize=False) 
+        teams_remaining_icon = preprocess_screenshot(teams_remaining_icon, resize=False, gpu=False) 
         teams_remaining_icon_2 = Image.open(f'{self.icons_dir}light_teams_remaining_icon.jpg')
-        teams_remaining_icon_2 = preprocess_screenshot(teams_remaining_icon_2, resize=False) 
+        teams_remaining_icon_2 = preprocess_screenshot(teams_remaining_icon_2, resize=False, gpu=False) 
         
         cod_warzone_lobby_icon = Image.open(f'{self.icons_dir}cod_warzone_lobby_icon.jpg')
-        cod_warzone_lobby_icon = preprocess_screenshot(cod_warzone_lobby_icon, resize=False) 
+        cod_warzone_lobby_icon = preprocess_screenshot(cod_warzone_lobby_icon, resize=False, gpu=False) 
         
         loading_screen_needle = Image.open(f'{self.icons_dir}middle_loading_menu.jpg')
-        loading_screen_needle = preprocess_screenshot(loading_screen_needle, resize=False)
+        loading_screen_needle = preprocess_screenshot(loading_screen_needle, resize=False, gpu=False)
         
         # TO DO: check quality of current -> narrow this down to 1 or blend them or whatever
         airplane_needle = Image.open(f'{self.icons_dir}n_players_on_airplane_icon.jpg')
-        airplane_needle = preprocess_screenshot(airplane_needle, resize=False)
+        airplane_needle = preprocess_screenshot(airplane_needle, resize=False, gpu=False)
         airplane_needle_2 = Image.open(f'{self.icons_dir}n_players_on_airplane_icon_2.jpg')
-        airplane_needle_2 = preprocess_screenshot(airplane_needle_2, resize=False)
+        airplane_needle_2 = preprocess_screenshot(airplane_needle_2, resize=False, gpu=False)
         
         leave_game_icon = Image.open(f'{self.icons_dir}leave_game_menu_top_text.jpg')
-        leave_game_icon = preprocess_screenshot(leave_game_icon, resize=False)  # miss this a lot do to quick qutting or watching non party leaders
+        leave_game_icon = preprocess_screenshot(leave_game_icon, resize=False, gpu=False)  # miss this a lot do to quick qutting or watching non party leaders
         
         temp_top_right_numbers_stash = []
         
@@ -333,23 +337,23 @@ class Numbers():
             # check for freeze
             if self.last_screenshot is None:
                 # save initial screenshot as attribute
-                self.last_screenshot = screenshot
+                self.last_screenshot = cv.resize(screenshot, (int(1280*0.1), int(720*0.1)))
             else:
-                if np.sum(screenshot != n.last_screenshot) > 0:
+                if np.sum(cv.resize(screenshot, (int(1280*0.1), int(720*0.1))) != self.last_screenshot) > 0:
                     # we're good, set last screenshot as this screenshot
-                    self.last_screenshot = screenshot
+                    self.last_screenshot = cv.resize(screenshot, (int(1280*0.1), int(720*0.1)))
                 else:
                     # try again (make sure we're not just briefly buffering or standing still or absent transition screen or etc...)
                     sleep(2)
                     screenshot, record_time = capture_screenshot(out_route)
-                    if np.sum(screenshot != n.last_screenshot) > 0:
+                    if np.sum(cv.resize(screenshot, (int(1280*0.1), int(720*0.1))) != self.last_screenshot) > 0:
                         # we're good, but print out the issue
                         print(f'ISSUE: BUFFERING SCREENSHOT | {loop} | {record_time} | {out_route}')
-                        self.last_screenshot = screenshot
+                        self.last_screenshot = cv.resize(screenshot, (int(1280*0.1), int(720*0.1)))
                     # short pause didn't resolve, we're frozen
                     else:
                         # save frozen (as attribute) for compairson
-                        self.frozen_screenshot = screenshot
+                        self.frozen_screenshot = cv.resize(screenshot, (int(1280*0.1), int(720*0.1)))
                         raise Exception(f'screenshot == self.last_screenshot\nsee self.frozen_screenshot & self.last_screenshot\n(latest) image file path: {out_route}\ntime {record_time}')
             
             a = dask.delayed(self.check_for_lobby)(self, screenshot, cod_warzone_lobby_icon)
@@ -389,6 +393,7 @@ class Numbers():
             if (self.in_lobby==False) and (self.is_loading_screen==False) and (self.leave_game_menu==False):
                 # crop top (25%) right corner of the screenshot
                 top_right_numbers_screenshot = Image.fromarray(screenshot.copy())
+                del screenshot
                 top_right_numbers_screenshot = top_right_numbers_screenshot.crop((int(1280*0.75), 0, 1280, int(720*.25)))
                 top_right_numbers_screenshot = np.array(top_right_numbers_screenshot)
                 
@@ -421,10 +426,6 @@ class Numbers():
                     if max_val >= threshold:
                         
                         needle_w = needle_img.shape[1]
-                        if needle_w < 18:
-                            if printout:
-                                print(f'needle_w=={needle_w}, adding 5')
-                            needle_w += 5
                         needle_h = needle_img.shape[0]
                         
                         # tag top left corner, add width & height to find bottom right corner of icon
