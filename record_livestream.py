@@ -592,14 +592,14 @@ class Numbers():
                                 self.recent_k_preds.append(self.last_k_pred)
                             except:
                                 pass
-                        if len(self.recent_k_preds) > 20:
-                            last_20_k_preds = self.recent_k_preds[-20:]
+                        if len(self.recent_k_preds) > 10:
+                            last_5_k_preds = self.recent_k_preds[-5:]
                             last_10_k_preds = self.recent_k_preds[-10:]
                             if printout:
-                                print(f'mode of last 20 n_kills: {max(set(last_20_k_preds), key=last_20_k_preds.count)} | {loop}')
+                                print(f'mode of last 5 n_kills: {max(set(last_5_k_preds), key=last_5_k_preds.count)} | {loop}')
                                 print(f'mode of last 10 n_kills: {max(set(last_10_k_preds), key=last_10_k_preds.count)}')
-                            if len(self.recent_k_preds) > 30:
-                                self.recent_k_preds = self.recent_k_preds[-21:]
+                            if len(self.recent_k_preds) > 11:
+                                self.recent_k_preds = self.recent_k_preds[-10:]
                         else:
                             if printout:
                                 print(f'n_kills: {k_pred} | {loop}')
@@ -610,7 +610,7 @@ class Numbers():
                                 self.second_to_last_pr_pred = self.last_pr_pred
                                 self.last_pr_pred = num_test
                                 self.recent_pr_preds.append(self.last_pr_pred)
-                                if len(self.recent_pr_preds) > 30:
+                                if len(self.recent_pr_preds) > 10:
                                     self.recent_pr_preds = self.recent_pr_preds[-9:]
                             except:
                                 pass
@@ -629,7 +629,7 @@ class Numbers():
                                 self.second_to_last_tr_pred = self.last_tr_pred
                                 self.last_tr_pred = num_test
                                 self.recent_tr_preds.append(self.last_tr_pred)
-                                if len(self.recent_tr_preds) > 30:
+                                if len(self.recent_tr_preds) > 10:
                                     self.recent_tr_preds = self.recent_tr_preds[-9:]
                             except:
                                 pass
