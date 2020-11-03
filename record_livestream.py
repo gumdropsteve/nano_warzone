@@ -405,10 +405,6 @@ class Numbers():
                         print(f'self.starting_game == {self.starting_game}')
                         print(f'image file path == {out_route}')
                 
-                # look for n_kills, n_pr, & n_tr icons
-                self.check_for_n_players_remaining_icon(self, top_right_numbers_screenshot)
-                self.check_for_n_teams_remaining_icon(self, top_right_numbers_screenshot)
-                
                 # look for n_kills skull icons
                 for needle_img in [dark_needle_icon_2]:  # dark_needle_icon
                     result = cv.matchTemplate(top_right_numbers_screenshot, needle_img, cv.TM_CCOEFF_NORMED)
@@ -469,6 +465,11 @@ class Numbers():
                         top_right_numbers_screenshot = top_right_numbers_screenshot_2
                         self.trusted_top_left = self.top_left
                         
+
+                        # a = dask.delayed(self.check_for_n_players_remaining_icon)(self, top_right_numbers_screenshot, players_remaining_icon)
+                        # b = dask.delayed(self.check_for_n_teams_remaining_icon)(self, top_right_numbers_screenshot, teams_remaining_icon_2)
+                        # c = dask.compute(*[a, b])
+
                         # look for players remaining icon
                         for needle_img_2 in [players_remaining_icon]: 
                             try:
@@ -562,6 +563,7 @@ class Numbers():
                         k_out = f'{self.output_dir}n_kills/{loop}.jpg'
                         pr_out = f'{self.output_dir}n_players_remaining/{loop}.jpg'
                         tr_out = f'{self.output_dir}n_teams_remaining/{loop}.jpg'
+
                         # self, image, crop, model, file_path, recrop=False, return_crop=False
                         save_crop = dask.delayed(self.crop_predict_save)(self, image=i, crop=None, model=None, file_path=crop_out, recrop=False, return_crop=False)
                         cropped_k = dask.delayed(self.crop_predict_save)(self, image=i, crop=n_kills_crop, model=model, file_path=k_out, recrop=(0, 0-5, 38, 28+5), return_crop=False)
@@ -569,13 +571,10 @@ class Numbers():
                         cropped_tr = dask.delayed(self.crop_predict_save)(self, image=i, crop=n_teams_remaining_crop, model=model, file_path=tr_out, recrop=(0, 0-5, 38, 28+5), return_crop=False)
                         
                         number_preds = dask.compute(*[save_crop, cropped_k, cropped_pr, cropped_tr])
-#                         number_preds = number_preds[0]
-#                         print(f'number_preds == {number_preds}')
                         
                         k_pred = number_preds[1]
                         pr_pred = number_preds[2]
                         tr_pred = number_preds[3]
-#                         print(f'tr_pred == {tr_pred}')
                     
                         if self.last_k_pred is not None:
                             try:
@@ -654,6 +653,7 @@ class Numbers():
                 this_run = [None, None, None, None, None, None, record_time, f'{self.output_dir}og_screenshots/{loop}.jpg', self.top_left, 
                             self.game_number, self.starting_game, self.in_lobby, self.is_loading_screen, self.leave_game_menu, self.streamer]
                 temp_top_right_numbers_stash.append(this_run)
+            
             if delays:
                 if _ % 3 == 2:
                     sleep(0.1)
@@ -664,6 +664,7 @@ class Numbers():
                 temp_top_right_numbers_stash = []
                 if delays:
                     sleep(3.33)
+            
         if len(temp_top_right_numbers_stash) > 0:
             record_numbers(temp_top_right_numbers_stash, f'{self.output_dir}sample_records.csv')
         
@@ -690,7 +691,7 @@ class Numbers():
         if crop is not None:
             i = i.crop(crop)
         if file_path is not None:
-            # i.save(file_path)
+            i.save(file_path)
             pass
         if recrop:
             i = i.crop(recrop)
@@ -730,10 +731,6 @@ class Numbers():
         if max_val >= threshold:
 
             needle_w = needle_img.shape[1]
-            if needle_w < 18:
-                if printout:
-                    print(f'needle_w=={needle_w}, adding 5')
-                needle_w += 5
             needle_h = needle_img.shape[0]
 
             # tag top left corner, add width & height to find bottom right corner of icon
@@ -769,8 +766,8 @@ class Numbers():
         min_val_2, max_val_2, min_loc_2, max_loc_2 = cv.minMaxLoc(result_2)
 
         threshold_2 = 0.8
-        needle_2_w = needle_img_2.shape[1]
-        needle_2_h = needle_img_2.shape[0] + 10
+        needle_2_w = needle.shape[1]
+        needle_2_h = needle.shape[0] + 10
 
         # do we have a satasfactory match?
         if max_val_2 >= threshold_2:
@@ -808,8 +805,8 @@ class Numbers():
             top_left_3 = max_loc_3  # want rectangle
             if top_left_3[1] != 0:
                 top_left_3 = (top_left_3[0], 0)
-            needle_3_w = needle_img_3.shape[1]
-            needle_3_h = needle_img_3.shape[0] + 10
+            needle_3_w = needle.shape[1]
+            needle_3_h = needle.shape[0] + 10
             bottom_right_3 = (top_left_3[0] + (needle_3_w), top_left_3[1] + needle_3_h)
 
             self.top_left_tr_icon = top_left_3
